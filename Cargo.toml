@@ -1,6 +1,6 @@
 [package]
 name = "armature-graphql"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 rust-version = "1.94.1"
 authors = ["Joseph Quinn <quinn.josephr@proton.me>"]
@@ -12,9 +12,9 @@ keywords = ["graphql", "api", "async-graphql", "server"]
 categories = ["web-programming", "api-bindings"]
 
 [dependencies]
-armature-core = { version = "0" }
-armature-log = { version = "0" }
-armature-graphql-macros = { version = "0" }
+armature-core = { version = "0.8" }
+armature-log = { version = "0.2" }
+armature-graphql-macros = { version = "0.1" }
 async-graphql = { version = "7.2.1", features = ["apollo_tracing"] }
 tokio = { version = "1.52", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "io-util"] }
 serde = { version = "1.0", features = ["derive"] }
