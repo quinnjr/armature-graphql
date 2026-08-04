@@ -1,20 +1,20 @@
 [package]
 name = "armature-graphql"
 version = "0.4.1"
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
+edition = "2024"
+rust-version = "1.94.1"
+authors = ["Joseph Quinn <quinn.josephr@proton.me>"]
+license = "Apache-2.0"
 repository = "https://github.com/quinnjr/armature-graphql"
-homepage.workspace = true
+homepage = "https://quinnjr.github.io/armature"
 description = "GraphQL server integration for Armature"
 keywords = ["graphql", "api", "async-graphql", "server"]
 categories = ["web-programming", "api-bindings"]
 
 [dependencies]
-armature-core = { path = "../armature-core", version = "0" }
-armature-log = { path = "../armature-log", version = "0" }
-armature-graphql-macros = { path = "../armature-graphql-macros", version = "0" }
+armature-core = { version = "0" }
+armature-log = { version = "0" }
+armature-graphql-macros = { version = "0" }
 async-graphql = { version = "7.2.1", features = ["apollo_tracing"] }
 tokio = { version = "1.52", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "io-util"] }
 serde = { version = "1.0", features = ["derive"] }
