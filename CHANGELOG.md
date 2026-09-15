@@ -9,15 +9,14 @@ Earlier changes are recorded in the workspace [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-15
+
 ### Changed
 
+- **Breaking:** requires `armature-core` 0.10 (was `0.9`); its types appear in this crate's API, so the requirement change is breaking here and the minor moves. Part of the `armature-core` 0.10 release train.
 - Dependency requirements moved to their latest releases: `syn` 2 → 3 (optional,
   static SDL export), `tokio-tungstenite` 0.29 → 0.30 (optional), `tokio` 1.53.
   No source changes were required; static SDL output is unchanged.
-
-### Fixed
-
-- The subscription cap decrements on server-side completion and bounds its tracking set even when unlimited; one-shot queries arrive as `subscribe` and so counted against the cap without ever being released.
 
 ## [0.5.0] - 2026-08-05
 
