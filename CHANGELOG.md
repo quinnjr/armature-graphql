@@ -9,6 +9,12 @@ Earlier changes are recorded in the workspace [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Dependency requirements moved to their latest releases: `syn` 2 → 3 (optional,
+  static SDL export), `tokio-tungstenite` 0.29 → 0.30 (optional), `tokio` 1.53.
+  No source changes were required; static SDL output is unchanged.
+
 ### Fixed
 
 - The subscription cap decrements on server-side completion and bounds its tracking set even when unlimited; one-shot queries arrive as `subscribe` and so counted against the cap without ever being released.
