@@ -9,6 +9,38 @@ Earlier changes are recorded in the workspace [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-17
+
+### Security
+
+- **Breaking:** `GraphQLConfig::new()` (and therefore `GraphQLConfig::default()`)
+  now returns production-safe defaults: playground, GraphiQL, schema docs and
+  introspection are off; query depth is capped at 15, complexity at 1000,
+  directives per field at 10 and parser recursion at 32. `production()` is now
+  identical to `new()`. Migration: use `GraphQLConfig::development()` or the
+  `with_*` builders to opt in to developer tooling.
+- **Breaking:** `SchemaBuilder`, `ProgrammaticSchemaBuilder` and
+  `SubgraphSchemaBuilder` apply `GraphQLConfig::default()` when no config is
+  attached, instead of building an unrestricted, introspectable schema.
+  Migration: attach `.config(GraphQLConfig::development(..))` (or a config with
+  `with_introspection(true)` / `with_max_depth(0)`) to restore the old behavior.
+- The complexity limit also bounds alias amplification (every aliased field
+  costs at least 1); async-graphql has no separate alias-count limit.
+- GraphQL Playground (`graphql-playground-react` 1.7.28) and GraphiQL
+  (`graphiql` 3.9.0, React 18.3.1) assets are pinned to exact versions and
+  loaded with Subresource Integrity + `crossorigin="anonymous"`, replacing the
+  unversioned CDN URLs. GraphiQL now mounts with `ReactDOM.createRoot`.
+- The endpoint interpolated into the playground/GraphiQL pages is emitted as
+  an escaped JavaScript string literal.
+
+### Added
+
+- `GraphQLConfig::max_directives` / `with_max_directives` and
+  `max_recursive_depth` / `with_max_recursive_depth`, plus the
+  `DEFAULT_MAX_*` constants and `GRAPHQL_PLAYGROUND_VERSION`,
+  `GRAPHIQL_VERSION`, `GRAPHIQL_REACT_VERSION`. **Breaking:** new public fields
+  on `GraphQLConfig` (struct-literal construction must add them).
+
 ## [0.6.0] - 2026-09-15
 
 ### Changed

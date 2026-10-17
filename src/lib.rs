@@ -176,7 +176,8 @@ where
 
     /// Attach a [`GraphQLConfig`] whose security/behavior knobs (introspection,
     /// max depth, max complexity, validation, tracing) will be applied to the
-    /// built schema. Without this, the schema is built unrestricted.
+    /// built schema. Without this, [`GraphQLConfig::default`] (production-safe:
+    /// introspection off, depth/complexity/directive limits on) is applied.
     pub fn config(mut self, config: GraphQLConfig) -> Self {
         self.config = Some(config);
         self
@@ -194,10 +195,7 @@ where
             .ok_or_else(|| ArmatureError::Internal("Subscription root is required".to_string()))?;
 
         let builder = Schema::build(query, mutation, subscription);
-        let builder = match &self.config {
-            Some(config) => config.configure(builder),
-            None => builder,
-        };
+        let builder = self.config.unwrap_or_default().configure(builder);
 
         Ok(builder.finish())
     }
@@ -214,7 +212,57 @@ where
     }
 }
 
+/// Pinned `graphql-playground-react` release served by [`graphql_playground_html`].
+pub const GRAPHQL_PLAYGROUND_VERSION: &str = "1.7.28";
+
+/// Pinned `graphiql` release served by [`graphiql_html`].
+pub const GRAPHIQL_VERSION: &str = "3.9.0";
+
+/// Pinned `react`/`react-dom` release served by [`graphiql_html`].
+pub const GRAPHIQL_REACT_VERSION: &str = "18.3.1";
+
+// Subresource Integrity hashes for the exact pinned CDN files below. They were
+// computed with `curl -sfL <url> | openssl dgst -sha384 -binary | base64`;
+// recompute them whenever a version constant changes.
+const PLAYGROUND_CSS_URL: &str =
+    "https://cdn.jsdelivr.net/npm/graphql-playground-react@1.7.28/build/static/css/index.css";
+const PLAYGROUND_CSS_SRI: &str =
+    "sha384-xb+UHILNN4fV3NgQMTjXk0x9A80U0hmkraTFvucUYTILJymGT8E1Aq2278NSi5+3";
+const PLAYGROUND_JS_URL: &str =
+    "https://cdn.jsdelivr.net/npm/graphql-playground-react@1.7.28/build/static/js/middleware.js";
+const PLAYGROUND_JS_SRI: &str =
+    "sha384-ardaO17esJ2ZxvY24V1OE6X4j+Z3WKgGMptrlDLmD+2w/JC3nbQ5ZfKGY2zfOPEE";
+const REACT_JS_URL: &str = "https://unpkg.com/react@18.3.1/umd/react.production.min.js";
+const REACT_JS_SRI: &str =
+    "sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z";
+const REACT_DOM_JS_URL: &str = "https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js";
+const REACT_DOM_JS_SRI: &str =
+    "sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1";
+const GRAPHIQL_CSS_URL: &str = "https://unpkg.com/graphiql@3.9.0/graphiql.min.css";
+const GRAPHIQL_CSS_SRI: &str =
+    "sha384-QMux00XgRtwRLSYIY3kw2rj1ovk5AuuliAchk+HSQbqdbGFnz9GYuqIlOqxhwCE2";
+const GRAPHIQL_JS_URL: &str = "https://unpkg.com/graphiql@3.9.0/graphiql.min.js";
+const GRAPHIQL_JS_SRI: &str =
+    "sha384-8NGfVj4CVlqHajlZj+bPJT4thxPMHMJYn7DWK2CvtopLd02E7qsPHazniBYvVjOO";
+
+/// Encode `endpoint` as a JavaScript string literal that is also safe inside
+/// an HTML `<script>` element (`<`, `>`, `&` and U+2028/2029 are escaped, so
+/// `</script>` cannot terminate the block).
+fn js_string_literal(endpoint: &str) -> String {
+    let json = serde_json::to_string(endpoint).unwrap_or_else(|_| "\"\"".to_string());
+    json.replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('&', "\\u0026")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029")
+}
+
 /// GraphQL playground HTML
+///
+/// Loads the pinned `graphql-playground-react` release
+/// ([`GRAPHQL_PLAYGROUND_VERSION`]) from jsDelivr with Subresource Integrity,
+/// so a compromised or changed CDN file is refused by the browser. Only serve
+/// this in development (see [`GraphQLConfig::development`]).
 ///
 /// # Example
 ///
@@ -223,6 +271,7 @@ where
 ///
 /// let html = graphql_playground_html("/graphql");
 /// assert!(html.contains("GraphQL Playground"));
+/// assert!(html.contains("integrity=\"sha384-"));
 /// ```
 pub fn graphql_playground_html(endpoint: &str) -> String {
     format!(
@@ -233,32 +282,51 @@ pub fn graphql_playground_html(endpoint: &str) -> String {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>GraphQL Playground</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/graphql-playground-react/build/static/css/index.css" />
-    <script src="https://cdn.jsdelivr.net/npm/graphql-playground-react/build/static/js/middleware.js"></script>
+    <link rel="stylesheet" href="{css_url}" integrity="{css_sri}" crossorigin="anonymous" />
+    <script src="{js_url}" integrity="{js_sri}" crossorigin="anonymous"></script>
 </head>
 <body>
     <div id="root"></div>
     <script>
         window.addEventListener('load', function (event) {{
             GraphQLPlayground.init(document.getElementById('root'), {{
-                endpoint: '{}'
+                endpoint: {endpoint}
             }})
         }})
     </script>
 </body>
 </html>
 "#,
-        endpoint
+        css_url = PLAYGROUND_CSS_URL,
+        css_sri = PLAYGROUND_CSS_SRI,
+        js_url = PLAYGROUND_JS_URL,
+        js_sri = PLAYGROUND_JS_SRI,
+        endpoint = js_string_literal(endpoint),
     )
 }
 
 /// GraphiQL HTML (lighter alternative)
+///
+/// Loads pinned `graphiql` ([`GRAPHIQL_VERSION`]) and React
+/// ([`GRAPHIQL_REACT_VERSION`]) builds from unpkg with Subresource Integrity.
+/// Only serve this in development (see [`GraphQLConfig::development`]).
+///
+/// # Example
+///
+/// ```
+/// use armature_graphql::graphiql_html;
+///
+/// let html = graphiql_html("/graphql");
+/// assert!(html.contains("graphiql@3.9.0"));
+/// assert!(html.contains("integrity=\"sha384-"));
+/// ```
 pub fn graphiql_html(endpoint: &str) -> String {
     format!(
         r#"
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8" />
     <title>GraphiQL</title>
     <style>
         body {{
@@ -271,36 +339,34 @@ pub fn graphiql_html(endpoint: &str) -> String {
             height: 100vh;
         }}
     </style>
-    <script
-        crossorigin
-        src="https://unpkg.com/react@18/umd/react.production.min.js"
-    ></script>
-    <script
-        crossorigin
-        src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"
-    ></script>
-    <link rel="stylesheet" href="https://unpkg.com/graphiql/graphiql.min.css" />
+    <script src="{react_url}" integrity="{react_sri}" crossorigin="anonymous"></script>
+    <script src="{react_dom_url}" integrity="{react_dom_sri}" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="{css_url}" integrity="{css_sri}" crossorigin="anonymous" />
 </head>
 <body>
     <div id="graphiql">Loading...</div>
-    <script
-        src="https://unpkg.com/graphiql/graphiql.min.js"
-        type="application/javascript"
-    ></script>
+    <script src="{js_url}" integrity="{js_sri}" crossorigin="anonymous" type="application/javascript"></script>
     <script>
         const fetcher = GraphiQL.createFetcher({{
-            url: '{}',
+            url: {endpoint},
         }});
 
-        ReactDOM.render(
+        ReactDOM.createRoot(document.getElementById('graphiql')).render(
             React.createElement(GraphiQL, {{ fetcher: fetcher }}),
-            document.getElementById('graphiql'),
         );
     </script>
 </body>
 </html>
 "#,
-        endpoint
+        react_url = REACT_JS_URL,
+        react_sri = REACT_JS_SRI,
+        react_dom_url = REACT_DOM_JS_URL,
+        react_dom_sri = REACT_DOM_JS_SRI,
+        css_url = GRAPHIQL_CSS_URL,
+        css_sri = GRAPHIQL_CSS_SRI,
+        js_url = GRAPHIQL_JS_URL,
+        js_sri = GRAPHIQL_JS_SRI,
+        endpoint = js_string_literal(endpoint),
     )
 }
 
@@ -341,5 +407,100 @@ mod tests {
         assert!(json.contains("\"data\":null"));
         assert!(value["errors"].is_array());
         assert_eq!(value["errors"][0], "something went wrong");
+    }
+
+    fn assert_pinned_with_sri(html: &str) {
+        let mut checked = 0;
+        for tag in html
+            .split('<')
+            .filter(|t| t.starts_with("script src") || t.starts_with("link rel=\"stylesheet\""))
+        {
+            checked += 1;
+            assert!(tag.contains("integrity=\"sha384-"), "missing SRI: <{tag}");
+            assert!(
+                tag.contains("crossorigin=\"anonymous\""),
+                "missing crossorigin: <{tag}"
+            );
+            let url = tag.split('"').nth(1).unwrap_or_default();
+            let url = if tag.starts_with("link") {
+                tag.split("href=\"")
+                    .nth(1)
+                    .unwrap()
+                    .split('"')
+                    .next()
+                    .unwrap()
+            } else {
+                url
+            };
+            assert!(
+                url.contains('@'),
+                "CDN URL must pin an exact version: {url}"
+            );
+        }
+        assert!(checked >= 2, "expected CDN assets in page");
+    }
+
+    #[test]
+    fn test_playground_assets_pinned_with_sri() {
+        let html = graphql_playground_html("/graphql");
+        assert_pinned_with_sri(&html);
+        assert!(html.contains(GRAPHQL_PLAYGROUND_VERSION));
+    }
+
+    #[test]
+    fn test_graphiql_assets_pinned_with_sri() {
+        let html = graphiql_html("/graphql");
+        assert_pinned_with_sri(&html);
+        assert!(html.contains(GRAPHIQL_VERSION));
+        assert!(html.contains(GRAPHIQL_REACT_VERSION));
+    }
+
+    #[test]
+    fn test_ide_pages_escape_endpoint() {
+        let payload = "/g'</script><script>alert(1)</script>";
+        for html in [graphql_playground_html(payload), graphiql_html(payload)] {
+            assert!(
+                !html.contains("<script>alert(1)"),
+                "endpoint not escaped: {html}"
+            );
+            assert!(html.contains("\\u003c/script\\u003e"));
+        }
+    }
+
+    struct DefaultLimitsQuery;
+
+    #[async_graphql::Object]
+    impl DefaultLimitsQuery {
+        async fn value(&self) -> i32 {
+            1
+        }
+    }
+
+    #[test]
+    fn test_schema_builder_without_config_applies_safe_defaults() {
+        let schema = SchemaBuilder::<
+            DefaultLimitsQuery,
+            async_graphql::EmptyMutation,
+            async_graphql::EmptySubscription,
+        >::new()
+        .query(DefaultLimitsQuery)
+        .mutation(async_graphql::EmptyMutation)
+        .subscription(async_graphql::EmptySubscription)
+        .build()
+        .unwrap();
+
+        let response = tokio_test::block_on(schema.execute("{ __schema { types { name } } }"));
+        assert!(response.data.into_json().unwrap()["__schema"].is_null());
+
+        let mut query = String::from("{");
+        for i in 0..=DEFAULT_MAX_COMPLEXITY {
+            query.push_str(&format!(" a{i}: value"));
+        }
+        query.push('}');
+        let response = tokio_test::block_on(schema.execute(query));
+        assert!(
+            !response.errors.is_empty(),
+            "complexity cap must apply without config"
+        );
     }
 }
