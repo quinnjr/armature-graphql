@@ -7,8 +7,10 @@ fn test_graphql_config_default() {
     let config = GraphQLConfig::default();
 
     assert_eq!(config.endpoint, "/graphql");
-    assert!(config.enable_playground);
-    assert!(config.enable_introspection);
+    assert!(!config.enable_playground);
+    assert!(!config.enable_introspection);
+    assert!(config.max_depth > 0);
+    assert!(config.max_complexity > 0);
 }
 
 #[test]

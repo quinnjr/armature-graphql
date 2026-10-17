@@ -29,7 +29,21 @@ pub struct GraphQLConfig {
     pub max_depth: usize,
 
     /// Maximum query complexity (0 = unlimited)
+    ///
+    /// Every selected field — including each aliased copy of a field —
+    /// costs at least 1, so this limit also bounds the total number of
+    /// fields and aliases a single operation can request. async-graphql has
+    /// no separate alias-count limit; this is the knob that covers alias
+    /// amplification (`a1: expensive a2: expensive ...`).
     pub max_complexity: usize,
+
+    /// Maximum number of directives on a single field (0 = unlimited)
+    pub max_directives: usize,
+
+    /// Maximum recursion depth of the query parser/validator. Guards against
+    /// stack exhaustion from deeply nested input values or fragments.
+    /// async-graphql's own default is 32.
+    pub max_recursive_depth: usize,
 
     /// Enable query validation
     pub enable_validation: bool,
@@ -38,8 +52,28 @@ pub struct GraphQLConfig {
     pub enable_tracing: bool,
 }
 
+/// Default maximum query depth applied by [`GraphQLConfig::new`].
+pub const DEFAULT_MAX_DEPTH: usize = 15;
+
+/// Default maximum query complexity applied by [`GraphQLConfig::new`].
+pub const DEFAULT_MAX_COMPLEXITY: usize = 1000;
+
+/// Default maximum directives per field applied by [`GraphQLConfig::new`].
+pub const DEFAULT_MAX_DIRECTIVES: usize = 10;
+
+/// Default parser/validator recursion limit applied by [`GraphQLConfig::new`].
+pub const DEFAULT_MAX_RECURSIVE_DEPTH: usize = 32;
+
 impl GraphQLConfig {
-    /// Create a new GraphQL configuration with defaults
+    /// Create a new GraphQL configuration with production-safe defaults.
+    ///
+    /// The defaults are locked down: playground, GraphiQL, the schema docs
+    /// endpoint and introspection are all **off**, and query depth,
+    /// complexity, directive count and parser recursion are capped
+    /// ([`DEFAULT_MAX_DEPTH`], [`DEFAULT_MAX_COMPLEXITY`],
+    /// [`DEFAULT_MAX_DIRECTIVES`], [`DEFAULT_MAX_RECURSIVE_DEPTH`]).
+    /// Opt in to the developer tooling with [`GraphQLConfig::development`]
+    /// or the individual `with_*` builders.
     ///
     /// # Example
     ///
@@ -48,7 +82,10 @@ impl GraphQLConfig {
     ///
     /// let config = GraphQLConfig::new("/graphql");
     /// assert_eq!(config.endpoint, "/graphql");
-    /// assert!(config.enable_playground); // Enabled by default in development
+    /// assert!(!config.enable_playground);
+    /// assert!(!config.enable_introspection);
+    /// assert_eq!(config.max_depth, 15);
+    /// assert_eq!(config.max_complexity, 1000);
     /// ```
     pub fn new(endpoint: impl Into<String>) -> Self {
         let endpoint = endpoint.into();
@@ -57,18 +94,23 @@ impl GraphQLConfig {
             graphiql_endpoint: format!("{}/graphiql", endpoint),
             schema_docs_endpoint: format!("{}/schema", endpoint),
             endpoint,
-            enable_playground: true,
+            enable_playground: false,
             enable_graphiql: false,
-            enable_schema_docs: true,
-            enable_introspection: true,
-            max_depth: 0,
-            max_complexity: 0,
+            enable_schema_docs: false,
+            enable_introspection: false,
+            max_depth: DEFAULT_MAX_DEPTH,
+            max_complexity: DEFAULT_MAX_COMPLEXITY,
+            max_directives: DEFAULT_MAX_DIRECTIVES,
+            max_recursive_depth: DEFAULT_MAX_RECURSIVE_DEPTH,
             enable_validation: true,
             enable_tracing: false,
         }
     }
 
-    /// Create a production configuration (playgrounds disabled)
+    /// Create a production configuration (playgrounds disabled).
+    ///
+    /// Identical to [`GraphQLConfig::new`], which is already production-safe;
+    /// kept as an explicit, self-documenting constructor.
     ///
     /// # Example
     ///
@@ -83,23 +125,14 @@ impl GraphQLConfig {
     /// assert_eq!(config.max_complexity, 1000); // DoS protection enabled by default
     /// ```
     pub fn production(endpoint: impl Into<String>) -> Self {
-        let mut config = Self::new(endpoint);
-        config.enable_playground = false;
-        config.enable_graphiql = false;
-        config.enable_introspection = false;
-        config.enable_schema_docs = false; // Can be enabled separately if needed
-        // `new()` defaults max_depth/max_complexity to 0 (unlimited), which
-        // leaves the server open to deeply nested or combinatorially
-        // expensive queries. Production deployments need real limits, not
-        // just introspection disabled; these are conservative starting
-        // points (see `configure()`/`limit_depth`/`limit_complexity`) that
-        // callers can override with `.with_max_depth()`/`.with_max_complexity()`.
-        config.max_depth = 15;
-        config.max_complexity = 1000;
-        config
+        Self::new(endpoint)
     }
 
-    /// Create a development configuration (all features enabled)
+    /// Create a development configuration (all features enabled).
+    ///
+    /// Turns on playground, GraphiQL, schema docs, introspection and
+    /// tracing. The depth/complexity limits from [`GraphQLConfig::new`] stay
+    /// in place. Never use this for an internet-facing deployment.
     ///
     /// # Example
     ///
@@ -164,15 +197,29 @@ impl GraphQLConfig {
         self
     }
 
-    /// Set maximum query depth
+    /// Set maximum query depth (0 disables the limit — not recommended)
     pub fn with_max_depth(mut self, depth: usize) -> Self {
         self.max_depth = depth;
         self
     }
 
-    /// Set maximum query complexity
+    /// Set maximum query complexity (0 disables the limit — not recommended)
     pub fn with_max_complexity(mut self, complexity: usize) -> Self {
         self.max_complexity = complexity;
+        self
+    }
+
+    /// Set the maximum number of directives on a single field (0 disables
+    /// the limit — not recommended)
+    pub fn with_max_directives(mut self, max_directives: usize) -> Self {
+        self.max_directives = max_directives;
+        self
+    }
+
+    /// Set the parser/validator recursion limit (must be non-zero; a value
+    /// of 0 falls back to [`DEFAULT_MAX_RECURSIVE_DEPTH`])
+    pub fn with_max_recursive_depth(mut self, depth: usize) -> Self {
+        self.max_recursive_depth = depth;
         self
     }
 
@@ -200,6 +247,9 @@ impl GraphQLConfig {
     /// Applies, in order:
     /// - `.limit_depth(max_depth)` when `max_depth != 0`
     /// - `.limit_complexity(max_complexity)` when `max_complexity != 0`
+    /// - `.limit_directives(max_directives)` when `max_directives != 0`
+    /// - `.limit_recursive_depth(max_recursive_depth)` (0 falls back to
+    ///   [`DEFAULT_MAX_RECURSIVE_DEPTH`])
     /// - `.disable_introspection()` when `!enable_introspection`
     /// - `.validation_mode(ValidationMode::Fast)` and `.disable_suggestions()`
     ///   when `!enable_validation` (async-graphql has no way to fully turn
@@ -240,6 +290,17 @@ impl GraphQLConfig {
             builder = builder.limit_complexity(self.max_complexity);
         }
 
+        if self.max_directives > 0 {
+            builder = builder.limit_directives(self.max_directives);
+        }
+
+        let recursive_depth = if self.max_recursive_depth > 0 {
+            self.max_recursive_depth
+        } else {
+            DEFAULT_MAX_RECURSIVE_DEPTH
+        };
+        builder = builder.limit_recursive_depth(recursive_depth);
+
         if !self.enable_introspection {
             builder = builder.disable_introspection();
         }
@@ -258,6 +319,7 @@ impl GraphQLConfig {
     }
 }
 
+/// Equivalent to `GraphQLConfig::new("/graphql")` — production-safe defaults.
 impl Default for GraphQLConfig {
     fn default() -> Self {
         Self::new("/graphql")
@@ -270,11 +332,34 @@ mod tests {
 
     #[test]
     fn test_default_config() {
+        // M5: the default constructor must be production-safe.
         let config = GraphQLConfig::new("/graphql");
         assert_eq!(config.endpoint, "/graphql");
-        assert!(config.enable_playground);
-        assert!(config.enable_introspection);
-        assert!(config.enable_schema_docs);
+        assert!(!config.enable_playground);
+        assert!(!config.enable_graphiql);
+        assert!(!config.enable_introspection);
+        assert!(!config.enable_schema_docs);
+        assert_eq!(config.max_depth, DEFAULT_MAX_DEPTH);
+        assert_eq!(config.max_complexity, DEFAULT_MAX_COMPLEXITY);
+        assert_eq!(config.max_directives, DEFAULT_MAX_DIRECTIVES);
+        assert_eq!(config.max_recursive_depth, DEFAULT_MAX_RECURSIVE_DEPTH);
+    }
+
+    #[test]
+    fn test_new_matches_production_and_default() {
+        let new = GraphQLConfig::new("/graphql");
+        let prod = GraphQLConfig::production("/graphql");
+        let default = GraphQLConfig::default();
+        for other in [&prod, &default] {
+            assert_eq!(new.enable_playground, other.enable_playground);
+            assert_eq!(new.enable_graphiql, other.enable_graphiql);
+            assert_eq!(new.enable_schema_docs, other.enable_schema_docs);
+            assert_eq!(new.enable_introspection, other.enable_introspection);
+            assert_eq!(new.max_depth, other.max_depth);
+            assert_eq!(new.max_complexity, other.max_complexity);
+            assert_eq!(new.max_directives, other.max_directives);
+            assert_eq!(new.max_recursive_depth, other.max_recursive_depth);
+        }
     }
 
     #[test]
@@ -387,10 +472,29 @@ mod tests {
     }
 
     #[test]
-    fn test_configure_allows_introspection_by_default() {
+    fn test_configure_denies_introspection_by_default() {
         use async_graphql::{EmptyMutation, EmptySubscription, Schema};
 
-        let config = GraphQLConfig::new("/graphql");
+        let schema = GraphQLConfig::new("/graphql")
+            .configure(Schema::build(
+                IntrospectionTestQuery,
+                EmptyMutation,
+                EmptySubscription,
+            ))
+            .finish();
+        let response = tokio_test::block_on(schema.execute("{ __schema { types { name } } }"));
+        let data = response.data.into_json().unwrap();
+        assert!(
+            data["__schema"].is_null(),
+            "GraphQLConfig::new() must not expose introspection: {data:?}"
+        );
+    }
+
+    #[test]
+    fn test_configure_allows_introspection_in_development() {
+        use async_graphql::{EmptyMutation, EmptySubscription, Schema};
+
+        let config = GraphQLConfig::development("/graphql");
         let schema = config
             .configure(Schema::build(
                 IntrospectionTestQuery,
@@ -403,14 +507,14 @@ mod tests {
 
         assert!(
             response.errors.is_empty(),
-            "default config should still allow introspection: {:?}",
+            "development config should allow introspection: {:?}",
             response.errors
         );
 
         let data = response.data.into_json().unwrap();
         assert!(
             !data["__schema"].is_null(),
-            "default config should return real introspection data"
+            "development config should return real introspection data"
         );
     }
 
@@ -469,7 +573,7 @@ mod tests {
     fn test_configure_is_noop_when_limits_unset() {
         use async_graphql::{EmptyMutation, EmptySubscription, Schema};
 
-        let config = GraphQLConfig::new("/graphql"); // max_depth: 0 (unlimited)
+        let config = GraphQLConfig::new("/graphql").with_max_depth(0); // explicit opt-out
         let schema = config
             .configure(Schema::build(
                 DepthTestQuery,
@@ -484,6 +588,53 @@ mod tests {
             response.errors.is_empty(),
             "unlimited depth config should not reject a depth-3 query: {:?}",
             response.errors
+        );
+    }
+
+    struct CostQuery;
+
+    #[async_graphql::Object]
+    impl CostQuery {
+        async fn value(&self) -> i32 {
+            1
+        }
+    }
+
+    #[test]
+    fn test_default_config_rejects_alias_amplification() {
+        use async_graphql::{EmptyMutation, EmptySubscription, Schema};
+
+        // 1001 aliased copies of one field exceed DEFAULT_MAX_COMPLEXITY.
+        let schema = GraphQLConfig::new("/graphql")
+            .configure(Schema::build(CostQuery, EmptyMutation, EmptySubscription))
+            .finish();
+        let mut query = String::from("{");
+        for i in 0..=DEFAULT_MAX_COMPLEXITY {
+            query.push_str(&format!(" a{i}: value"));
+        }
+        query.push('}');
+        let response = tokio_test::block_on(schema.execute(query));
+        assert!(
+            !response.errors.is_empty(),
+            "alias amplification beyond the default complexity cap must be rejected"
+        );
+
+        let ok = tokio_test::block_on(schema.execute("{ a: value b: value }"));
+        assert!(ok.errors.is_empty(), "{:?}", ok.errors);
+    }
+
+    #[test]
+    fn test_default_config_rejects_excess_directives() {
+        use async_graphql::{EmptyMutation, EmptySubscription, Schema};
+
+        let schema = GraphQLConfig::new("/graphql")
+            .configure(Schema::build(CostQuery, EmptyMutation, EmptySubscription))
+            .finish();
+        let directives = " @include(if: true)".repeat(DEFAULT_MAX_DIRECTIVES + 1);
+        let response = tokio_test::block_on(schema.execute(format!("{{ value{directives} }}")));
+        assert!(
+            !response.errors.is_empty(),
+            "more than DEFAULT_MAX_DIRECTIVES directives on a field must be rejected"
         );
     }
 }
