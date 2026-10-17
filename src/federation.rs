@@ -253,8 +253,9 @@ where
 
     /// Attach a [`crate::config::GraphQLConfig`] whose security/behavior knobs
     /// (introspection, max depth, max complexity, validation) will be applied
-    /// to the built subgraph schema. Without this, the schema is built
-    /// unrestricted.
+    /// to the built subgraph schema. Without this,
+    /// [`crate::config::GraphQLConfig::default`] (production-safe:
+    /// introspection off, depth/complexity/directive limits on) is applied.
     pub fn config(mut self, config: crate::config::GraphQLConfig) -> Self {
         self.config = Some(config);
         self
@@ -293,11 +294,9 @@ where
             builder = builder.enable_federation();
         }
 
-        if let Some(config) = &self.config {
-            let mut config = config.clone();
-            config.enable_tracing = false; // already handled above; avoid double-registration
-            builder = config.configure(builder);
-        }
+        let mut config = self.config.unwrap_or_default();
+        config.enable_tracing = false; // already handled above; avoid double-registration
+        builder = config.configure(builder);
 
         let schema = builder.finish();
 

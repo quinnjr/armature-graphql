@@ -55,7 +55,8 @@ where
 
     /// Attach a [`GraphQLConfig`] whose security/behavior knobs (introspection,
     /// max depth, max complexity, validation, tracing) will be applied to the
-    /// built schema. Without this, the schema is built unrestricted.
+    /// built schema. Without this, [`GraphQLConfig::default`] (production-safe:
+    /// introspection off, depth/complexity/directive limits on) is applied.
     pub fn config(mut self, config: GraphQLConfig) -> Self {
         self.config = Some(config);
         self
@@ -74,9 +75,7 @@ where
             schema_builder = schema_builder.data(service);
         }
 
-        if let Some(config) = &self.config {
-            schema_builder = config.configure(schema_builder);
-        }
+        schema_builder = self.config.unwrap_or_default().configure(schema_builder);
 
         schema_builder.finish()
     }
