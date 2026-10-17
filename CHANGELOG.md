@@ -9,6 +9,8 @@ Earlier changes are recorded in the workspace [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-17
+
 ### Security
 
 - **Breaking:** `GraphQLConfig::new()` (and therefore `GraphQLConfig::default()`)
