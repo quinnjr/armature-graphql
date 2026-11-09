@@ -12,7 +12,7 @@ keywords = ["graphql", "api", "async-graphql", "server"]
 categories = ["web-programming", "api-bindings"]
 
 [dependencies]
-armature-core = { version = "0.12" }
+armature-core = { version = "0.13" }
 armature-log = { version = "0.3" }
 armature-graphql-macros = { version = "0.1" }
 async-graphql = { version = "7.2.1", features = ["apollo_tracing"] }
